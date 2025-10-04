@@ -77,6 +77,23 @@ curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc   | sudo tee /etc/apt/t
 Add configuration
 cp ngrok.yml ~/.config/ngrok/ngrok.yml
 
+Add auth token for ngrok from https://dashboard.ngrok.com/get-started/your-authtoken
+ngrok config add-authtoken <your-auth-token>
+
+Add ngrok service to start on bootup
+cp ngrok.service /etc/systemd/system/ngrok.service
+
+Reload systemd to make it aware of the new file:
+sudo systemctl daemon-reload
+
+Enable your service to start on boot:
+sudo systemctl enable ngrok.service
+
+Start the service now to test it without rebooting:
+sudo systemctl start ngrok.service
+
+Check the status to see if it's running correctly:
+sudo systemctl status ngrok.service
 
 
 ## Inside the server script
