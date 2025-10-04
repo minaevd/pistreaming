@@ -1,0 +1,26 @@
+version: "3"
+agent:
+    authtoken: 1aBwLsQQus7N5qWN7wj1WI93BDo_tWgBzdvxfBsjmsXNbLqh
+endpoints:
+  - name: camera-garage
+    description: Main Web and WS Server for Camera Viewer (Port 8082)
+    url: epithetic-berneice-unvariant.ngrok-free.dev
+    upstream:
+      url: 8082
+    traffic_policy:
+      on_http_request:
+        - name: OAuth
+          actions:
+            - type: oauth
+              config:
+                auth_id: oauth
+                provider: google
+        - name: Deny-Unauthorized-Email
+          expressions:
+            - "!(actions.ngrok.oauth.identity.email in ['minaevd@gmail.com', 'ola.minaeva@gmail.com'])"
+          actions:
+            - type: custom-response
+              config:
+                body: "Access Denied: ${actions.ngrok.oauth.identity.email} is not authorized."
+                status_code: 403
+

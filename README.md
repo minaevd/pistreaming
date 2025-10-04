@@ -70,6 +70,15 @@ sudo systemctl start mds-camera.service
 Check the status to see if it's running correctly:
 sudo systemctl status mds-camera.service
 
+## Configure ngrok to access the camera from outside
+Install ngrok
+curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc   | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null   && echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main"   | sudo tee /etc/apt/sources.list.d/ngrok.list   && sudo apt update   && sudo apt install ngrok
+
+Add configuration
+cp ngrok.yml ~/.config/ngrok/ngrok.yml
+
+
+
 ## Inside the server script
 
 The server script is fairly simple but may look a bit daunting to Python
