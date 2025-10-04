@@ -1,0 +1,13 @@
+[Unit]
+Description=ngrok Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+ExecStart=/usr/local/bin/ngrok start camera-garage
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
