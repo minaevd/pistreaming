@@ -14,7 +14,7 @@ Firstly make sure you've got a functioning Pi camera module (test it with
 `raspistill` to be certain). Then make sure you've got the following packages
 installed:
 
-    $ sudo apt-get install ffmpeg git python3-picamera python3-ws4py
+    $ sudo apt-get install ffmpeg git python3-picamera2 python3-ws4py git
 
 Next, clone this repository:
 
