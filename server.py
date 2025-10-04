@@ -9,7 +9,7 @@ from string import Template
 from struct import Struct
 from threading import Thread
 from time import sleep, time
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler # Used only for date utility now
 from wsgiref.simple_server import make_server
 
 import picamera
@@ -27,7 +27,7 @@ WIDTH = 640
 HEIGHT = 480
 FRAMERATE = 24
 HTTP_PORT = 8082
-WS_PORT = 8084
+WS_PORT = HTTP_PORT # **UNIFIED PORT:** Both services run on 8082
 COLOR = u'#444'
 BGCOLOR = u'#333'
 JSMPEG_MAGIC = b'jsmp'
@@ -35,50 +35,65 @@ JSMPEG_HEADER = Struct('>4sHH')
 VFLIP = False
 HFLIP = False
 
+# Global variables to store file contents and the WSGI WebSocket application
+INDEX_TEMPLATE = None
+JSMPEG_CONTENT = None
+WSGI_WS_APP = None
 ###########################################
 
+# --- WSGI HTTP Application (Replaces StreamingHttpHandler/Server) ---
 
-class StreamingHttpHandler(BaseHTTPRequestHandler):
-    def do_HEAD(self):
-        self.do_GET()
+# This function handles serving files (index.html, jsmpg.js) as a WSGI application
+def http_app(environ, start_response):
+    """
+    Handles standard HTTP requests for the HTML and JavaScript files.
+    """
+    path = environ.get('PATH_INFO', '')
+    
+    if path == '/':
+        start_response('301 Moved Permanently', [('Location', '/index.html')])
+        return []
+    elif path == '/jsmpg.js':
+        content_type = 'application/javascript'
+        content = JSMPEG_CONTENT
+    elif path == '/index.html':
+        content_type = 'text/html; charset=utf-8'
+        tpl = Template(INDEX_TEMPLATE)
+        # We no longer need to reference WS_PORT, as the client will use the same port as the page
+        content = tpl.safe_substitute(dict(
+            WS_PORT=WS_PORT, WIDTH=WIDTH, HEIGHT=HEIGHT, COLOR=COLOR,
+            BGCOLOR=BGCOLOR))
+    else:
+        start_response('404 Not Found', [('Content-Type', 'text/plain')])
+        return [b'File not found']
+    
+    content = content.encode('utf-8')
+    
+    # Simple headers for file serving
+    start_response('200 OK', [
+        ('Content-Type', content_type),
+        ('Content-Length', str(len(content))),
+        ('Last-Modified', BaseHTTPRequestHandler.date_time_string(time()))
+    ])
+    return [content]
 
-    def do_GET(self):
-        if self.path == '/':
-            self.send_response(301)
-            self.send_header('Location', '/index.html')
-            self.end_headers()
-            return
-        elif self.path == '/jsmpg.js':
-            content_type = 'application/javascript'
-            content = self.server.jsmpg_content
-        elif self.path == '/index.html':
-            content_type = 'text/html; charset=utf-8'
-            tpl = Template(self.server.index_template)
-            content = tpl.safe_substitute(dict(
-                WS_PORT=WS_PORT, WIDTH=WIDTH, HEIGHT=HEIGHT, COLOR=COLOR,
-                BGCOLOR=BGCOLOR))
-        else:
-            self.send_error(404, 'File not found')
-            return
-        content = content.encode('utf-8')
-        self.send_response(200)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', len(content))
-        self.send_header('Last-Modified', self.date_time_string(time()))
-        self.end_headers()
-        if self.command == 'GET':
-            self.wfile.write(content)
+# --- Combined WSGI Dispatcher Application ---
 
+def application(environ, start_response):
+    """
+    Main WSGI application that dispatches requests.
+    If 'Upgrade: websocket' header is present, it routes to the ws4py app.
+    Otherwise, it routes to the standard HTTP file serving app.
+    """
+    # Check if this is a WebSocket upgrade request
+    if environ.get('HTTP_UPGRADE', '').lower() == 'websocket':
+        # Route to the ws4py handler
+        return WSGI_WS_APP(environ, start_response)
+    else:
+        # Route to the standard HTTP file server
+        return http_app(environ, start_response)
 
-class StreamingHttpServer(HTTPServer):
-    def __init__(self):
-        super(StreamingHttpServer, self).__init__(
-                ('', HTTP_PORT), StreamingHttpHandler)
-        with io.open('index.html', 'r') as f:
-            self.index_template = f.read()
-        with io.open('jsmpg.js', 'r') as f:
-            self.jsmpg_content = f.read()
-
+# --- WebSocket and Broadcast Classes (Unchanged, but integrated below) ---
 
 class StreamingWebSocket(WebSocket):
     def opened(self):
@@ -122,6 +137,7 @@ class BroadcastThread(Thread):
             while True:
                 buf = self.converter.stdout.read1(32768)
                 if buf:
+                    # websocket_server is now the combined_server
                     self.websocket_server.manager.broadcast(buf, binary=True)
                 elif self.converter.poll() is not None:
                     break
@@ -130,6 +146,19 @@ class BroadcastThread(Thread):
 
 
 def main():
+    global INDEX_TEMPLATE, JSMPEG_CONTENT, WSGI_WS_APP
+    
+    # Load content files once before starting the server
+    try:
+        with io.open('index.html', 'r') as f:
+            INDEX_TEMPLATE = f.read()
+        with io.open('jsmpg.js', 'r') as f:
+            JSMPEG_CONTENT = f.read()
+    except IOError as e:
+        print("ERROR: Could not find 'index.html' or 'jsmpg.js'. Ensure these files are in the same directory.")
+        print(e)
+        return
+
     print('Initializing camera')
     with picamera.PiCamera() as camera:
         camera.resolution = (WIDTH, HEIGHT)
@@ -137,30 +166,35 @@ def main():
         camera.vflip = VFLIP # flips image rightside up, as needed
         camera.hflip = HFLIP # flips image left-right, as needed
         sleep(1) # camera warm-up time
-        print('Initializing websockets server on port %d' % WS_PORT)
+        
+        # 1. Initialize the ws4py WebSocket application component
+        WSGI_WS_APP = WebSocketWSGIApplication(handler_cls=StreamingWebSocket)
+
+        print('Initializing unified HTTP/WS server on port %d' % HTTP_PORT)
+        
+        # 2. Create the combined server using the dispatching 'application' function
         WebSocketWSGIHandler.http_version = '1.1'
-        websocket_server = make_server(
-            '', WS_PORT,
+        combined_server = make_server(
+            '', HTTP_PORT, # Uses the unified port 8082
             server_class=WSGIServer,
             handler_class=WebSocketWSGIRequestHandler,
-            app=WebSocketWSGIApplication(handler_cls=StreamingWebSocket))
-        websocket_server.initialize_websockets_manager()
-        websocket_thread = Thread(target=websocket_server.serve_forever)
-        print('Initializing HTTP server on port %d' % HTTP_PORT)
-        http_server = StreamingHttpServer()
-        http_thread = Thread(target=http_server.serve_forever)
+            app=application # Uses the application() dispatcher
+        )
+        combined_server.initialize_websockets_manager()
+        server_thread = Thread(target=combined_server.serve_forever)
+        
         print('Initializing broadcast thread')
         output = BroadcastOutput(camera)
-        broadcast_thread = BroadcastThread(output.converter, websocket_server)
+        broadcast_thread = BroadcastThread(output.converter, combined_server)
         print('Starting recording')
         camera.start_recording(output, 'yuv')
+        
         try:
-            print('Starting websockets thread')
-            websocket_thread.start()
-            print('Starting HTTP server thread')
-            http_thread.start()
+            print('Starting server thread (HTTP and WS)')
+            server_thread.start()
             print('Starting broadcast thread')
             broadcast_thread.start()
+            
             while True:
                 camera.wait_recording(1)
         except KeyboardInterrupt:
@@ -170,15 +204,12 @@ def main():
             camera.stop_recording()
             print('Waiting for broadcast thread to finish')
             broadcast_thread.join()
-            print('Shutting down HTTP server')
-            http_server.shutdown()
-            print('Shutting down websockets server')
-            websocket_server.shutdown()
-            print('Waiting for HTTP server thread to finish')
-            http_thread.join()
-            print('Waiting for websockets thread to finish')
-            websocket_thread.join()
+            print('Shutting down server')
+            combined_server.shutdown()
+            print('Waiting for server thread to finish')
+            server_thread.join()
 
 
 if __name__ == '__main__':
     main()
+
