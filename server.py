@@ -196,22 +196,22 @@ def main():
         print('Initializing broadcast thread')
         output = BroadcastOutput(camera)
         broadcast_thread = BroadcastThread(output.converter, combined_server)
-        print('Starting recording')
-        camera.start_recording(output)
+
+        print('Starting server thread (HTTP and WS)')
+        server_thread.start()
+        print('Starting broadcast thread')
+        broadcast_thread.start()
 
         try:
-            print('Starting server thread (HTTP and WS)')
-            server_thread.start()
-            print('Starting broadcast thread')
-            broadcast_thread.start()
-
+            print('Starting frame capture')
             while True:
-                sleep(1)
+                frame = camera.capture_array('main')
+                output.write(frame.tobytes())
         except KeyboardInterrupt:
             pass
         finally:
-            print('Stopping recording')
-            camera.stop_recording()
+            print('Stopping capture')
+            output.flush()
             print('Waiting for broadcast thread to finish')
             broadcast_thread.join()
             print('Shutting down server')
