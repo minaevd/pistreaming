@@ -12,7 +12,9 @@ from time import sleep, time
 from http.server import BaseHTTPRequestHandler # Used only for date utility now
 from wsgiref.simple_server import make_server
 
-import picamera
+from picamera2 import Picamera2, Transform
+from picamera2.encoders import MJPEGEncoder
+from picamera2.outputs import FileOutput
 from ws4py.websocket import WebSocket
 from ws4py.server.wsgirefserver import (
     WSGIServer,
@@ -103,16 +105,18 @@ class StreamingWebSocket(WebSocket):
 class BroadcastOutput(object):
     def __init__(self, camera):
         print('Spawning background conversion process')
+        resolution = camera.camera_config['main']['size']
+        framerate = camera.camera_config['main']['format'].split('@')[1].rstrip('fps') if '@' in str(camera.camera_config['main']['format']) else str(FRAMERATE)
         self.converter = Popen([
             'ffmpeg',
             '-f', 'rawvideo',
             '-pix_fmt', 'yuv420p',
-            '-s', '%dx%d' % camera.resolution,
-            '-r', str(float(camera.framerate)),
+            '-s', '%dx%d' % resolution,
+            '-r', framerate,
             '-i', '-',
             '-f', 'mpeg1video',
             '-b', '800k',
-            '-r', str(float(camera.framerate)),
+            '-r', framerate,
             '-'],
             stdin=PIPE, stdout=PIPE, stderr=io.open(os.devnull, 'wb'),
             shell=False, close_fds=True)
@@ -160,18 +164,23 @@ def main():
         return
 
     print('Initializing camera')
-    with picamera.PiCamera() as camera:
-        camera.resolution = (WIDTH, HEIGHT)
-        camera.framerate = FRAMERATE
-        camera.vflip = VFLIP # flips image rightside up, as needed
-        camera.hflip = HFLIP # flips image left-right, as needed
-        sleep(1) # camera warm-up time
-        
+    camera = Picamera2()
+
+    # Configure camera with transform for flips
+    config = camera.create_video_configuration(
+        main={"size": (WIDTH, HEIGHT), "format": "YUV420"},
+        transform=Transform(hflip=HFLIP, vflip=VFLIP)
+    )
+    camera.configure(config)
+    camera.start()
+    sleep(1) # camera warm-up time
+
+    try:
         # 1. Initialize the ws4py WebSocket application component
         WSGI_WS_APP = WebSocketWSGIApplication(handler_cls=StreamingWebSocket)
 
         print('Initializing unified HTTP/WS server on port %d' % HTTP_PORT)
-        
+
         # 2. Create the combined server using the dispatching 'application' function
         WebSocketWSGIHandler.http_version = '1.1'
         combined_server = make_server(
@@ -182,21 +191,21 @@ def main():
         )
         combined_server.initialize_websockets_manager()
         server_thread = Thread(target=combined_server.serve_forever)
-        
+
         print('Initializing broadcast thread')
         output = BroadcastOutput(camera)
         broadcast_thread = BroadcastThread(output.converter, combined_server)
         print('Starting recording')
-        camera.start_recording(output, 'yuv')
-        
+        camera.start_recording(FileOutput(output), format='yuv420')
+
         try:
             print('Starting server thread (HTTP and WS)')
             server_thread.start()
             print('Starting broadcast thread')
             broadcast_thread.start()
-            
+
             while True:
-                camera.wait_recording(1)
+                sleep(1)
         except KeyboardInterrupt:
             pass
         finally:
@@ -208,6 +217,9 @@ def main():
             combined_server.shutdown()
             print('Waiting for server thread to finish')
             server_thread.join()
+    finally:
+        camera.stop()
+        camera.close()
 
 
 if __name__ == '__main__':
