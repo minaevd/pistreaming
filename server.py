@@ -12,9 +12,10 @@ from time import sleep, time
 from http.server import BaseHTTPRequestHandler # Used only for date utility now
 from wsgiref.simple_server import make_server
 
-from picamera2 import Picamera2, Transform
+from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder
 from picamera2.outputs import FileOutput
+from libcamera import Transform
 from ws4py.websocket import WebSocket
 from ws4py.server.wsgirefserver import (
     WSGIServer,
