@@ -1,0 +1,13 @@
+[Unit]
+Description=camera app
+After=network.target
+
+[Service]
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/pistreaming
+ExecStart=/usr/bin/python3 /home/pi/pistreaming/server.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

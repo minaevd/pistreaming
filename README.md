@@ -54,6 +54,21 @@ to shut down unless you close the client web browsers (Chrome in particular
 tends to keep connections open which will prevent the server from shutting down
 until the socket closes).
 
+## Install it as a service
+Create a service configuration
+sudo cp mds-camera.service /etc/systemd/system/mds-camera.service
+
+Reload systemd to make it aware of the new file:
+sudo systemctl daemon-reload
+
+Enable your service to start on boot:
+sudo systemctl enable mds-camera.service
+
+Start the service now to test it without rebooting:
+sudo systemctl start mds-camera.service
+
+Check the status to see if it's running correctly:
+sudo systemctl status mds-camera.service
 
 ## Inside the server script
 
