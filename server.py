@@ -197,7 +197,7 @@ def main():
         output = BroadcastOutput(camera)
         broadcast_thread = BroadcastThread(output.converter, combined_server)
         print('Starting recording')
-        camera.start_recording(FileOutput(output), format='yuv420')
+        camera.start_recording(output)
 
         try:
             print('Starting server thread (HTTP and WS)')
